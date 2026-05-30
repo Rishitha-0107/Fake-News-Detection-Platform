@@ -1,7 +1,9 @@
 import streamlit as st
 import numpy as np
 import joblib
+import json
 import re
+import os
 
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import (
@@ -11,13 +13,17 @@ from tensorflow.keras.layers import (
     Dropout
 )
 
+from tensorflow.keras.preprocessing.text import (
+    tokenizer_from_json
+)
+
 from tensorflow.keras.preprocessing.sequence import (
     pad_sequences
 )
 
-# ==========================================
+# =====================================
 # PAGE CONFIG
-# ==========================================
+# =====================================
 
 st.set_page_config(
     page_title="AI Fake News Detection Platform",
@@ -25,31 +31,60 @@ st.set_page_config(
     layout="wide"
 )
 
-# ==========================================
-# LOAD FILES
-# ==========================================
+# =====================================
+# BASE DIRECTORY
+# =====================================
+
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
+
+# =====================================
+# LOAD ARTIFACTS
+# =====================================
 
 @st.cache_resource
 def load_artifacts():
 
-    tokenizer = joblib.load(
-        "tokenizer.pkl"
+    tokenizer_path = os.path.join(
+        BASE_DIR,
+        "tokenizer.json"
     )
 
-    encoder = joblib.load(
+    encoder_path = os.path.join(
+        BASE_DIR,
         "label_encoder.pkl"
     )
 
-    MAX_WORDS = 10000
-    MAX_LEN = 500
+    weights_path = os.path.join(
+        BASE_DIR,
+        "fake_news_weights.weights.h5"
+    )
 
+    # Load tokenizer JSON
+    with open(
+        tokenizer_path,
+        "r",
+        encoding="utf-8"
+    ) as f:
+
+        tokenizer = tokenizer_from_json(
+            f.read()
+        )
+
+    # Load encoder
+    encoder = joblib.load(
+        encoder_path
+    )
+
+    # Rebuild model
     model = Sequential()
 
     model.add(
         Embedding(
-            MAX_WORDS,
-            128,
-            input_length=MAX_LEN
+            input_dim=10000,
+            output_dim=128,
+            input_length=500
         )
     )
 
@@ -75,17 +110,37 @@ def load_artifacts():
         )
     )
 
+    model.build(
+        input_shape=(None, 500)
+    )
+
     model.load_weights(
-        "fake_news_weights.weights.h5"
+        weights_path
     )
 
     return model, tokenizer, encoder
 
-model, tokenizer, encoder = load_artifacts()
+# =====================================
+# LOAD
+# =====================================
 
-# ==========================================
-# TEXT CLEANING
-# ==========================================
+try:
+
+    model, tokenizer, encoder = (
+        load_artifacts()
+    )
+
+except Exception as e:
+
+    st.error(
+        f"Loading Error: {e}"
+    )
+
+    st.stop()
+
+# =====================================
+# CLEAN TEXT
+# =====================================
 
 def clean_text(text):
 
@@ -105,29 +160,29 @@ def clean_text(text):
 
     return text
 
-# ==========================================
+# =====================================
 # HEADER
-# ==========================================
+# =====================================
 
 st.title(
     "📰 AI Fake News Detection Platform"
 )
 
 st.markdown(
-    "### LSTM-Based News Authenticity Analyzer"
+    "### Deep Learning LSTM-Based News Verification System"
 )
 
 st.divider()
 
-# ==========================================
+# =====================================
 # SIDEBAR
-# ==========================================
+# =====================================
 
 st.sidebar.header(
     "📌 Project Information"
 )
 
-st.sidebar.info(
+st.sidebar.success(
     """
     Model: LSTM
 
@@ -135,23 +190,22 @@ st.sidebar.info(
     Fake & Real News Dataset
 
     Output:
-    Fake / Real News
+    Fake / Real
     """
 )
 
-# ==========================================
-# INPUT AREA
-# ==========================================
+# =====================================
+# INPUT
+# =====================================
 
 news_text = st.text_area(
-    "📝 Enter News Article",
-    height=250,
-    placeholder="Paste the news article here..."
+    "Paste News Article",
+    height=250
 )
 
-# ==========================================
-# PREDICTION
-# ==========================================
+# =====================================
+# PREDICT
+# =====================================
 
 if st.button(
     "🚀 Analyze News",
@@ -166,12 +220,12 @@ if st.button(
 
     else:
 
-        cleaned = clean_text(
+        cleaned_text = clean_text(
             news_text
         )
 
         sequence = tokenizer.texts_to_sequences(
-            [cleaned]
+            [cleaned_text]
         )
 
         padded = pad_sequences(
@@ -179,14 +233,14 @@ if st.button(
             maxlen=500
         )
 
-        probability = (
+        probability = float(
             model.predict(
                 padded,
                 verbose=0
             )[0][0]
         )
 
-        if probability > 0.5:
+        if probability >= 0.5:
 
             prediction = "Real"
 
@@ -203,17 +257,17 @@ if st.button(
                 * 100
             )
 
-        # ==========================
+        # =========================
         # RESULTS
-        # ==========================
+        # =========================
 
         st.subheader(
             "📊 Prediction Results"
         )
 
-        col1, col2 = st.columns(2)
+        c1, c2 = st.columns(2)
 
-        with col1:
+        with c1:
 
             if prediction == "Real":
 
@@ -227,91 +281,51 @@ if st.button(
                     "🚨 FAKE NEWS"
                 )
 
-        with col2:
+        with c2:
 
             st.metric(
-                "Confidence Score",
+                "Confidence",
                 f"{confidence:.2f}%"
             )
 
         st.progress(
-            float(confidence / 100)
+            confidence / 100
         )
 
-        # ==========================
-        # RISK LEVEL
-        # ==========================
-
-        st.subheader(
-            "⚠ Risk Assessment"
-        )
-
-        if confidence > 90:
-
-            st.success(
-                "Very High Confidence Prediction"
-            )
-
-        elif confidence > 75:
-
-            st.info(
-                "High Confidence Prediction"
-            )
-
-        elif confidence > 60:
-
-            st.warning(
-                "Moderate Confidence Prediction"
-            )
-
-        else:
-
-            st.error(
-                "Low Confidence Prediction"
-            )
-
-        # ==========================
-        # AI INSIGHTS
-        # ==========================
+        # =========================
+        # INSIGHTS
+        # =========================
 
         st.subheader(
             "🤖 AI Insights"
         )
 
-        word_count = len(
-            news_text.split()
-        )
+        col1, col2, col3 = st.columns(3)
 
-        char_count = len(
-            news_text
-        )
-
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
+        with col1:
 
             st.metric(
                 "Words",
-                word_count
+                len(news_text.split())
             )
 
-        with c2:
+        with col2:
 
             st.metric(
                 "Characters",
-                char_count
+                len(news_text)
             )
 
-        with c3:
+        with col3:
 
             st.metric(
                 "Prediction",
                 prediction
             )
 
-        # ==========================
+        # =========================
         # RECOMMENDATION
-        # ==========================
+        # =========================
 
         st.subheader(
             "💡 Recommendation"
@@ -321,9 +335,9 @@ if st.button(
 
             st.error(
                 """
-                Verify this article using
+                Verify this article from
                 trusted news sources before
-                sharing it.
+                sharing.
                 """
             )
 
@@ -331,14 +345,14 @@ if st.button(
 
             st.success(
                 """
-                This article appears to be
-                from a reliable source.
+                Article appears genuine
+                according to the model.
                 """
             )
 
-# ==========================================
-# COMPARISON SECTION
-# ==========================================
+# =====================================
+# MODEL COMPARISON
+# =====================================
 
 st.divider()
 
@@ -346,31 +360,31 @@ st.subheader(
     "📈 ANN vs SimpleRNN vs LSTM"
 )
 
-comparison = {
+comparison_data = {
     "Model":
-    ["ANN", "SimpleRNN", "LSTM"],
+        ["ANN", "SimpleRNN", "LSTM"],
 
-    "Handles Long Text":
-    ["❌", "⚠️", "✅"],
+    "Long Text":
+        ["❌", "⚠️", "✅"],
 
     "Memory":
-    ["❌", "Limited", "Excellent"],
-
-    "Context Understanding":
-    ["Low", "Medium", "High"],
+        ["❌", "Limited", "Excellent"],
 
     "Accuracy":
-    ["Medium", "Good", "Best"]
+        ["Medium", "Good", "Best"],
+
+    "Context":
+        ["Low", "Medium", "High"]
 }
 
-st.table(comparison)
+st.table(comparison_data)
 
-# ==========================================
+# =====================================
 # FOOTER
-# ==========================================
+# =====================================
 
 st.markdown("---")
 
 st.caption(
-    "📰 AI Fake News Detection Platform | Deep Learning LSTM"
+    "📰 AI Fake News Detection Platform | LSTM Deep Learning Model"
 )
